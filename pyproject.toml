@@ -25,6 +25,9 @@ dev = [
   "ruff>=0.12,<1.0",
 ]
 
+[project.scripts]
+sns360-synthetic = "sns_patient_360.synthetic.cli:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
