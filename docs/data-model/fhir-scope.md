@@ -36,21 +36,69 @@ FHIR is the interoperability contract. The Patient 360 application model is a se
 
 ## Patient 360 read model
 
-```text
-Patient360
-├── identity
-├── clinical_state
-│   ├── active_conditions
-│   ├── active_medications
-│   ├── allergies
-│   └── pending_care
-├── timeline
-├── laboratory_trends
-├── procedures
-├── referrals
-├── appointments
-├── documents
-└── provenance
+```mermaid
+flowchart TD
+    PATIENT[Patient 360]
+
+    PATIENT --> ID[Identity]
+    PATIENT --> STATE[Clinical State]
+    PATIENT --> TIMELINE[Timeline]
+    PATIENT --> TRENDS[Laboratory Trends]
+    PATIENT --> PROCEDURES[Procedures]
+    PATIENT --> REFERRALS[Referrals]
+    PATIENT --> APPOINTMENTS[Appointments]
+    PATIENT --> DOCUMENTS[Documents]
+    PATIENT --> PROVENANCE[Provenance]
+
+    STATE --> CONDITIONS[Active Conditions]
+    STATE --> MEDICATIONS[Active Medications]
+    STATE --> ALLERGIES[Allergies]
+    STATE --> PENDING[Pending Care]
+```
+
+## FHIR-to-Patient-360 mapping boundary
+
+```mermaid
+flowchart LR
+    subgraph FHIR[FHIR resources]
+        P[Patient]
+        E[Encounter]
+        C[Condition]
+        O[Observation]
+        MR[MedicationRequest]
+        AI[AllergyIntolerance]
+        PR[Procedure]
+        SR[ServiceRequest]
+        DR[DocumentReference]
+        PV[Provenance]
+    end
+
+    ENGINE[Patient State Engine]
+
+    subgraph READ[Patient 360 read model]
+        SUMMARY[Clinical Summary]
+        TL[Longitudinal Timeline]
+        LAB[Laboratory Trends]
+        CARE[Pending Care]
+        TRACE[Source Traceability]
+    end
+
+    P --> ENGINE
+    E --> ENGINE
+    C --> ENGINE
+    O --> ENGINE
+    MR --> ENGINE
+    AI --> ENGINE
+    PR --> ENGINE
+    SR --> ENGINE
+    DR --> ENGINE
+    PV --> ENGINE
+
+    ENGINE --> SUMMARY
+    ENGINE --> TL
+    ENGINE --> LAB
+    ENGINE --> CARE
+    ENGINE --> TRACE
 ```
 
 The read model is designed for user-facing queries. It is not a replacement for the underlying FHIR resources.

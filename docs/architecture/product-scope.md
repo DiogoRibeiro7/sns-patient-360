@@ -43,6 +43,12 @@ The first usable release must answer:
 
 All repository examples, fixtures and demonstrations must use synthetic data. No production secrets, credentials, identifiers or patient records may be committed.
 
+## Requirements contract
+
+Functional and non-functional requirements are versioned in [`requirements.md`](requirements.md). Their `FR-*` and `NFR-*` identifiers are the stable traceability keys used by architecture decisions, implementation pull requests and tests.
+
+The system architecture and Mermaid diagrams are maintained in [`system-architecture.md`](system-architecture.md).
+
 ## Positioning
 
 This repository is an independent technical reference implementation. It is not an official SNS, SPMS or Portuguese government product.
