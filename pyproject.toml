@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "sns-patient-360"
 version = "0.1.0"
@@ -5,7 +9,7 @@ description = "Reference platform for a longitudinal, auditable Patient 360 view
 requires-python = ">=3.11"
 authors = [{ name = "Diogo Ribeiro" }]
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
 
 dependencies = [
   "fastapi>=0.116,<1.0",
@@ -20,6 +24,9 @@ dev = [
   "pytest-cov>=6.2,<7.0",
   "ruff>=0.12,<1.0",
 ]
+
+[tool.setuptools]
+packages = []
 
 [tool.pytest.ini_options]
 addopts = "-ra --strict-markers --strict-config"
