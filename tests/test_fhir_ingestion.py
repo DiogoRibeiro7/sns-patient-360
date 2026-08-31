@@ -1,12 +1,13 @@
 """Integration tests for canonical FHIR ingestion and longitudinal persistence."""
 
 from copy import deepcopy
+from typing import Any
 
 from sns_patient_360.ingestion import CanonicalClinicalStore, IngestionService
 from sns_patient_360.synthetic import generate_journey, source_bundle_to_fhir
 
 
-def _documents() -> list[dict[str, object]]:
+def _documents() -> list[dict[str, Any]]:
     journey = generate_journey(seed=360)
     return [source_bundle_to_fhir(bundle) for bundle in journey.sources]
 
