@@ -5,6 +5,7 @@ REQUIRED_DOCS: tuple[str, ...] = (
     "docs/architecture/product-scope.md",
     "docs/architecture/system-architecture.md",
     "docs/architecture/requirements.md",
+    "docs/architecture/ingestion-persistence.md",
     "docs/data-model/fhir-scope.md",
     "docs/security/threat-model.md",
     "docs/adr/0001-use-fhir-as-interoperability-contract.md",
@@ -15,6 +16,7 @@ REQUIRED_DOCS: tuple[str, ...] = (
 MERMAID_DOCS: tuple[str, ...] = (
     "README.md",
     "docs/architecture/system-architecture.md",
+    "docs/architecture/ingestion-persistence.md",
     "docs/data-model/fhir-scope.md",
 )
 
