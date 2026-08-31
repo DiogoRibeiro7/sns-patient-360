@@ -8,6 +8,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 SourceName = Literal["primary-care", "hospital", "laboratory", "pharmacy"]
+Sex = Literal["male", "female", "other", "unknown"]
 
 
 class SyntheticPatientIdentity(BaseModel):
@@ -19,7 +20,7 @@ class SyntheticPatientIdentity(BaseModel):
     given_name: str
     family_name: str
     birth_date: date
-    sex: Literal["male", "female", "other", "unknown"]
+    sex: Sex
     synthetic_national_health_id: str
 
 
@@ -32,6 +33,10 @@ class SourcePatientIdentity(BaseModel):
     source_patient_id: str
     synthetic_master_id: str
     synthetic_national_health_id: str
+    given_name: str
+    family_name: str
+    birth_date: date
+    sex: Sex
 
 
 class SyntheticClinicalResource(BaseModel):
