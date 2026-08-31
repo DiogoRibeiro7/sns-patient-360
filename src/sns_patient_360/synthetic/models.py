@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any, Literal, TypeAlias
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
-
-JsonValue: TypeAlias = str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
 
 SourceName = Literal["primary-care", "hospital", "laboratory", "pharmacy"]
 
