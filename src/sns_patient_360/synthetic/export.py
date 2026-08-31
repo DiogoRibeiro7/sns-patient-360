@@ -36,6 +36,15 @@ def _patient_resource(bundle: SyntheticSourceBundle) -> dict[str, Any]:
                 "value": bundle.patient.synthetic_national_health_id,
             }
         ],
+        "name": [
+            {
+                "use": "official",
+                "family": bundle.patient.family_name,
+                "given": [bundle.patient.given_name],
+            }
+        ],
+        "birthDate": bundle.patient.birth_date.isoformat(),
+        "gender": bundle.patient.sex,
         "meta": _meta(bundle.source),
     }
 
