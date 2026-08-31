@@ -8,24 +8,57 @@ from typing import Any
 
 from sns_patient_360.synthetic.models import SyntheticJourney, SyntheticSourceBundle
 
+SYNTHETIC_TAG_SYSTEM = "https://example.invalid/sns-patient-360/synthetic"
+SYNTHETIC_IDENTIFIER_SYSTEM = (
+    "https://example.invalid/sns-patient-360/synthetic-national-health-id"
+)
+SOURCE_URI_PREFIX = "urn:sns-patient-360:source:"
+
+
+def _meta(source: str) -> dict[str, Any]:
+    """Build deterministic source and synthetic metadata for one exported resource."""
+    return {
+        "source": f"{SOURCE_URI_PREFIX}{source}",
+        "versionId": "1",
+        "tag": [{"system": SYNTHETIC_TAG_SYSTEM, "code": "synthetic"}],
+    }
+
+
+def _patient_resource(bundle: SyntheticSourceBundle) -> dict[str, Any]:
+    """Build the source-local Patient resource used for cross-source identity resolution."""
+    return {
+        "resourceType": "Patient",
+        "id": bundle.patient.source_patient_id,
+        "active": True,
+        "identifier": [
+            {
+                "system": SYNTHETIC_IDENTIFIER_SYSTEM,
+                "value": bundle.patient.synthetic_national_health_id,
+            }
+        ],
+        "meta": _meta(bundle.source),
+    }
+
 
 def source_bundle_to_fhir(bundle: SyntheticSourceBundle) -> dict[str, Any]:
-    """Convert one source bundle into a minimal FHIR Bundle-shaped document."""
-    entries: list[dict[str, Any]] = []
+    """Convert one source bundle into a deterministic FHIR Bundle-shaped document.
+
+    Every export contains exactly one source-local ``Patient`` resource. Other resources
+    reference that local patient. The shared synthetic national identifier is carried only
+    as an explicit Patient identifier so later identity resolution can operate from the
+    exported bundle rather than from generator internals.
+    """
+    entries: list[dict[str, Any]] = [{"resource": _patient_resource(bundle)}]
+
     for resource in bundle.resources:
+        if resource.resource_type == "Patient":
+            continue
+
         fhir_resource: dict[str, Any] = {
             "resourceType": resource.resource_type,
             "id": resource.resource_id,
             "subject": {"reference": f"Patient/{bundle.patient.source_patient_id}"},
-            "meta": {
-                "source": bundle.source,
-                "tag": [
-                    {
-                        "system": "https://example.invalid/sns-patient-360/synthetic",
-                        "code": "synthetic",
-                    }
-                ],
-            },
+            "meta": _meta(bundle.source),
             **resource.payload,
         }
         if resource.occurred_at is not None:
@@ -38,7 +71,7 @@ def source_bundle_to_fhir(bundle: SyntheticSourceBundle) -> dict[str, Any]:
         "timestamp": bundle.generated_at.isoformat(),
         "identifier": {
             "system": "https://example.invalid/sns-patient-360/source-bundle",
-            "value": f"{bundle.source}-{bundle.patient.synthetic_master_id}",
+            "value": f"{bundle.source}-{bundle.patient.source_patient_id}",
         },
         "entry": entries,
     }
