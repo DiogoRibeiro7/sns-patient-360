@@ -5,10 +5,8 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime
-from typing import Any
 
-from sqlalchemy import JSON, DateTime, MetaData, String, Table, Column, Engine, create_engine, select
+from sqlalchemy import JSON, Column, DateTime, Engine, MetaData, String, Table, create_engine, select
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import IntegrityError
 
@@ -45,6 +43,16 @@ _RESOURCES = Table(
     Column("canonical_patient_id", String, nullable=False),
     Column("payload", JSON, nullable=False),
     Column("ingested_at", DateTime(timezone=True), nullable=False),
+)
+
+_INGESTION_EVENTS = Table(
+    "ingestion_events",
+    _METADATA,
+    Column("event_id", String, primary_key=True),
+    Column("source_system", String, nullable=False),
+    Column("outcome", String, nullable=False),
+    Column("detail", String, nullable=False),
+    Column("occurred_at", DateTime(timezone=True), nullable=False),
 )
 
 
@@ -158,8 +166,7 @@ class CanonicalClinicalStore:
         ).one_or_none()
         if row is None:
             return False
-        existing_payload = row[0]
-        if existing_payload != resource.payload:
+        if row[0] != resource.payload:
             raise ValueError(
                 "conflicting payload for an existing source resource version; refusing overwrite"
             )
@@ -185,6 +192,26 @@ class CanonicalClinicalStore:
             )
         except IntegrityError as exc:
             raise ValueError("resource version already exists") from exc
+
+    def record_ingestion_event(
+        self,
+        event_id: str,
+        source_system: str,
+        outcome: str,
+        detail: str,
+        occurred_at: object,
+    ) -> None:
+        """Append one ingestion outcome to the audit-oriented event ledger."""
+        with self._engine.begin() as connection:
+            connection.execute(
+                _INGESTION_EVENTS.insert().values(
+                    event_id=event_id,
+                    source_system=source_system,
+                    outcome=outcome,
+                    detail=detail,
+                    occurred_at=occurred_at,
+                )
+            )
 
     def list_resources(self, canonical_patient_id: str) -> tuple[CanonicalClinicalResource, ...]:
         """List all preserved resource versions for one canonical patient."""
@@ -237,3 +264,11 @@ class CanonicalClinicalStore:
         """Return the number of preserved source resource versions."""
         with self._engine.connect() as connection:
             return len(connection.execute(select(_RESOURCES.c.resource_id)).all())
+
+    def ingestion_event_count(self, outcome: str | None = None) -> int:
+        """Return ingestion-event count, optionally filtered by outcome."""
+        with self._engine.connect() as connection:
+            statement = select(_INGESTION_EVENTS.c.event_id)
+            if outcome is not None:
+                statement = statement.where(_INGESTION_EVENTS.c.outcome == outcome)
+            return len(connection.execute(statement).all())
