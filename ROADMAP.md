@@ -40,13 +40,15 @@ The first release proves that fragmented synthetic clinical records can be recon
 - Mermaid imaging, retrieval, security and trust-boundary diagrams
 
 ### Milestone 5 — Synthetic imaging integration
-- Synthetic DICOM study generation
-- CT/X-ray/ultrasound-style synthetic examples where practical
-- STOW-RS ingestion into the reference PACS
-- `ImagingStudy` metadata association
-- Study/report linkage
-- QIDO-RS discovery and WADO-RS retrieval tests
+- Deterministic synthetic single-instance DX study generation
+- Stable Study/Series/SOP Instance UID generation
+- FHIR `Endpoint` + `ImagingStudy` + `DiagnosticReport` linkage
+- STOW-RS ingestion into Orthanc
+- QIDO-RS study discovery by Study Instance UID
+- WADO-RS instance retrieval
 - Patient identity linkage across FHIR and DICOM planes
+- Dedicated Orthanc + MinIO integration workflow
+- Additional CT/ultrasound-style multi-instance synthetic examples only after the single-instance contract is stable
 
 ### Milestone 6 — Patient State Engine and Patient 360 API
 - Patient summary
