@@ -11,6 +11,7 @@ REQUIRED_DOCS: tuple[str, ...] = (
     "docs/adr/0001-use-fhir-as-interoperability-contract.md",
     "docs/adr/0002-separate-fhir-store-from-patient-360-read-model.md",
     "docs/adr/0003-synthetic-data-only.md",
+    "docs/adr/0004-use-polyglot-persistence.md",
 )
 
 MERMAID_DOCS: tuple[str, ...] = (

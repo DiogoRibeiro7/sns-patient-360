@@ -17,15 +17,26 @@ from sns_patient_360.ingestion.validation import (
     extract_synthetic_identifier,
     validate_bundle,
 )
+from sns_patient_360.persistence.document_store import ClinicalDocumentStore
 
 
 class IngestionService:
-    """Validate, resolve and persist one source bundle atomically."""
+    """Validate, resolve and persist one source bundle.
 
-    def __init__(self, store: CanonicalClinicalStore) -> None:
+    Relational identity/audit state is handled by ``CanonicalClinicalStore``. When a
+    ``ClinicalDocumentStore`` is configured, complete versioned FHIR resources are also
+    written to the document store using the same deterministic source-version key.
+    """
+
+    def __init__(
+        self,
+        store: CanonicalClinicalStore,
+        document_store: ClinicalDocumentStore | None = None,
+    ) -> None:
         if not isinstance(store, CanonicalClinicalStore):
             raise TypeError("store must be a CanonicalClinicalStore")
         self._store = store
+        self._document_store = document_store
 
     def ingest_bundle(self, bundle: dict[str, Any]) -> IngestionResult:
         """Ingest one source bundle with deterministic identity resolution and provenance."""
@@ -57,20 +68,15 @@ class IngestionService:
             )
 
         canonical_patient_id = str(
-            uuid5(
-                NAMESPACE_URL,
-                f"sns-patient-360:patient:{shared_identifier}",
-            )
+            uuid5(NAMESPACE_URL, f"sns-patient-360:patient:{shared_identifier}")
         )
         accepted = 0
         duplicates = 0
+        new_documents: list[CanonicalClinicalResource] = []
 
         try:
             with self._store.transaction() as connection:
-                patient = self._store.resolve_patient_by_identifier(
-                    connection,
-                    shared_identifier,
-                )
+                patient = self._store.resolve_patient_by_identifier(connection, shared_identifier)
                 if patient is None:
                     patient = self._store.create_patient(
                         connection,
@@ -110,7 +116,12 @@ class IngestionService:
                         duplicates += 1
                     else:
                         self._store.insert_resource(connection, canonical)
+                        new_documents.append(canonical)
                         accepted += 1
+
+            if self._document_store is not None:
+                for canonical in new_documents:
+                    self._document_store.upsert_version(canonical)
         except ValueError as exc:
             self._store.record_ingestion_event(
                 event_id=event_id,

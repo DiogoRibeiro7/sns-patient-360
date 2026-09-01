@@ -23,30 +23,35 @@ flowchart LR
 
     API[FHIR API]
     VALIDATE[Validation and Normalisation]
-    STORE[(FHIR Clinical Store)]
+    PG[(PostgreSQL\nIdentity / Audit)]
+    MONGO[(MongoDB\nFHIR Documents)]
     STATE[Patient State Engine]
+    REDIS[(Redis\nProjection Cache)]
     P360[(Patient 360 Read Model)]
     CLIN[Clinician View]
     PAT[Patient View]
-    AUDIT[(Provenance and Audit)]
 
     PC --> API
     HOSP --> API
     LAB --> API
     PHARM --> API
     API --> VALIDATE
-    VALIDATE --> STORE
-    VALIDATE --> AUDIT
-    STORE --> STATE
+    VALIDATE --> PG
+    VALIDATE --> MONGO
+    PG --> STATE
+    MONGO --> STATE
     STATE --> P360
-    STATE --> AUDIT
+    STATE --> REDIS
+    REDIS --> P360
     P360 --> CLIN
     P360 --> PAT
 ```
 
 FHIR is the interoperability contract. Patient 360 is a derived application read model. Every derived clinical item must remain traceable to the FHIR resources that support it.
 
-All versioned architecture and process diagrams use Mermaid. See [`docs/architecture/system-architecture.md`](docs/architecture/system-architecture.md) for the full architecture and [`docs/architecture/requirements.md`](docs/architecture/requirements.md) for the functional and non-functional requirements.
+Persistence is deliberately polyglot: PostgreSQL holds relational identity, alias, consent/audit and ingestion metadata; MongoDB preserves complete versioned FHIR documents; Redis is reserved for disposable, rebuildable Patient 360 projections and is never authoritative clinical storage.
+
+All versioned architecture and process diagrams use Mermaid. See [`docs/architecture/system-architecture.md`](docs/architecture/system-architecture.md) for the full architecture, [`docs/architecture/ingestion-persistence.md`](docs/architecture/ingestion-persistence.md) for persistence boundaries and [`docs/architecture/requirements.md`](docs/architecture/requirements.md) for the functional and non-functional requirements.
 
 ## Initial clinical scope
 
@@ -80,7 +85,9 @@ The resulting API must expose a Patient 360 summary and unified timeline with so
 
 - Python 3.11+
 - FastAPI and Pydantic
-- PostgreSQL for persistent clinical data
+- PostgreSQL for relational identity and audit metadata
+- MongoDB for complete versioned FHIR documents
+- Redis for non-authoritative Patient 360 caching
 - Docker Compose for local orchestration
 - typed Python with strict `mypy`
 - `ruff` for linting

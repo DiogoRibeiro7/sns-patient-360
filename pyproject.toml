@@ -14,12 +14,15 @@ license = "MIT"
 dependencies = [
   "fastapi>=0.116,<1.0",
   "pydantic>=2.11,<3.0",
+  "pymongo>=4.15,<5.0",
+  "redis>=6.4,<7.0",
   "sqlalchemy>=2.0,<3.0",
   "uvicorn>=0.35,<1.0",
 ]
 
 [project.optional-dependencies]
 dev = [
+  "mongomock>=4.3,<5.0",
   "mypy>=1.17,<2.0",
   "pytest>=8.4,<9.0",
   "pytest-cov>=6.2,<7.0",

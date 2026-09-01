@@ -30,8 +30,11 @@ The first release proves that fragmented synthetic clinical records can be recon
 - Source normalization
 - Patient identity resolution
 - Provenance preservation
-- PostgreSQL persistence
-- Implements primarily: FR-010–FR-014, FR-020, NFR-010–NFR-023
+- PostgreSQL for relational identity, alias and ingestion metadata
+- MongoDB for complete versioned FHIR resource documents
+- Recoverable idempotent cross-database write protocol
+- Redis reserved for non-authoritative Patient 360 projection caching
+- Implements primarily: FR-010–FR-014, FR-020, NFR-010–NFR-023, NFR-042
 
 ### Milestone 4 — Patient 360 API
 - Patient summary
@@ -40,6 +43,7 @@ The first release proves that fragmented synthetic clinical records can be recon
 - Allergies
 - Unified clinical timeline
 - Pending care items
+- Rebuildable projection cache backed by Redis where useful
 - Implements primarily: FR-002–FR-006, FR-021, FR-040–FR-042
 
 ### Milestone 5 — Clinician interface
