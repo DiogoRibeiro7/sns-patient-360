@@ -47,7 +47,8 @@ class IngestionService:
         """Ingest one source bundle with deterministic identity resolution and provenance."""
         ingested_at = datetime.now(UTC)
         source_hint = self._source_hint(bundle)
-        event_id = str(uuid5(NAMESPACE_URL, f"{source_hint}:{ingested_at.isoformat()}:{id(bundle)}"))
+        event_key = f"{source_hint}:{ingested_at.isoformat()}:{id(bundle)}"
+        event_id = str(uuid5(NAMESPACE_URL, event_key))
 
         try:
             source_system, source_patient_id, resources = validate_bundle(bundle)
@@ -145,8 +146,6 @@ class IngestionService:
                 for canonical in canonical_documents:
                     self._document_store.upsert_version(canonical)
             except Exception as exc:
-                # The relational commit may already be durable. Persist an explicit partial
-                # state and fail the overall operation so a safe replay can reconcile MongoDB.
                 detail = (
                     "document-store persistence incomplete; safe replay required: "
                     f"{type(exc).__name__}: {exc}"
