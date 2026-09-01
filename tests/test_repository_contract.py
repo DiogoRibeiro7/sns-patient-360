@@ -1,7 +1,8 @@
 """Repository-level architecture and requirements contract tests."""
 
-from pathlib import Path
+from __future__ import annotations
 
+from pathlib import Path
 
 REQUIRED_DOCS: tuple[str, ...] = (
     "docs/architecture/product-scope.md",
