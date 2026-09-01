@@ -38,6 +38,60 @@ services:
       timeout: 5s
       retries: 10
 
+  minio:
+    image: minio/minio:latest
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: sns360-minio-dev
+      MINIO_ROOT_PASSWORD: sns360-minio-dev-only
+      MINIO_REGION_NAME: eu-west-1
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - minio-data:/data
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >-
+        until mc alias set local http://minio:9000 sns360-minio-dev sns360-minio-dev-only;
+        do sleep 2; done;
+        mc mb --ignore-existing local/orthanc-dicom
+    restart: "no"
+
+  orthanc:
+    image: orthancteam/orthanc:latest
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      DICOM_WEB_PLUGIN_ENABLED: "true"
+      AWS_S3_STORAGE_PLUGIN_ENABLED: "true"
+      ORTHANC__NAME: sns-patient-360-pacs
+      ORTHANC__REMOTE_ACCESS_ALLOWED: "true"
+      ORTHANC__REGISTERED_USERS: '{"sns360":"sns360-orthanc-dev-only"}'
+      ORTHANC__DICOM_WEB__ROOT: /dicom-web/
+      ORTHANC__AWS_S3_STORAGE__BUCKET_NAME: orthanc-dicom
+      ORTHANC__AWS_S3_STORAGE__REGION: eu-west-1
+      ORTHANC__AWS_S3_STORAGE__ENDPOINT: http://minio:9000/
+      ORTHANC__AWS_S3_STORAGE__ACCESS_KEY: sns360-minio-dev
+      ORTHANC__AWS_S3_STORAGE__SECRET_KEY: sns360-minio-dev-only
+      ORTHANC__AWS_S3_STORAGE__VIRTUAL_ADDRESSING: "false"
+    ports:
+      - "127.0.0.1:4242:4242"
+      - "127.0.0.1:8042:8042"
+    healthcheck:
+      test: ["CMD", "/probes/test-aliveness.py"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
 volumes:
   postgres-data:
   mongo-data:
+  minio-data:
