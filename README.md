@@ -1,6 +1,6 @@
 # SNS Patient 360
 
-Patient-centred longitudinal health record reference platform for the Portuguese SNS, using HL7 FHIR, synthetic clinical systems, provenance, consent and auditable Patient 360 views.
+Patient-centred longitudinal health record reference platform for the Portuguese SNS, using HL7 FHIR, DICOM/DICOMweb, synthetic clinical systems, provenance, consent and auditable Patient 360 views.
 
 > This is an independent reference implementation and is not an official SNS or SPMS product. The project uses synthetic data only.
 
@@ -10,83 +10,86 @@ The platform explores how fragmented clinical information can be reconstructed i
 
 The core product question is:
 
-> Can a clinician understand the patient's current state, recent history and pending care from one auditable view?
+> Can a clinician understand the patient's current state, recent history, diagnostic imaging and pending care from one auditable view?
 
 ## Architecture
 
 ```mermaid
-flowchart LR
-    PC[Primary Care]
-    HOSP[Hospital]
-    LAB[Laboratory]
-    PHARM[Pharmacy]
+flowchart TB
+    subgraph Sources[Clinical source systems]
+        PC[Primary Care]
+        HOSP[Hospital]
+        LAB[Laboratory]
+        PHARM[Pharmacy]
+        IMG[Imaging Modalities]
+    end
 
-    API[FHIR API]
-    VALIDATE[Validation and Normalisation]
+    FHIR[FHIR API / Validation]
+    DICOM[DICOM / DICOMweb Gateway]
+
     PG[(PostgreSQL\nIdentity / Audit)]
     MONGO[(MongoDB\nFHIR Documents)]
-    STATE[Patient State Engine]
+    PACS[(PACS / VNA\nImaging Catalogue)]
+    OBJECT[(S3-compatible Object Storage\nDICOM Objects)]
     REDIS[(Redis\nProjection Cache)]
-    P360[(Patient 360 Read Model)]
+
+    STATE[Patient State Engine]
+    P360[Patient 360 API]
+    VIEWER[DICOM Viewer]
     CLIN[Clinician View]
     PAT[Patient View]
 
-    PC --> API
-    HOSP --> API
-    LAB --> API
-    PHARM --> API
-    API --> VALIDATE
-    VALIDATE --> PG
-    VALIDATE --> MONGO
+    PC --> FHIR
+    HOSP --> FHIR
+    LAB --> FHIR
+    PHARM --> FHIR
+    HOSP --> DICOM
+    IMG --> DICOM
+
+    FHIR --> PG
+    FHIR --> MONGO
+    DICOM --> PACS
+    PACS --> OBJECT
+
     PG --> STATE
     MONGO --> STATE
-    STATE --> P360
+    PACS --> STATE
     STATE --> REDIS
+    STATE --> P360
     REDIS --> P360
+
     P360 --> CLIN
     P360 --> PAT
+    CLIN --> VIEWER
+    VIEWER --> DICOM
 ```
 
-FHIR is the interoperability contract. Patient 360 is a derived application read model. Every derived clinical item must remain traceable to the FHIR resources that support it.
+FHIR remains the clinical interoperability contract. DICOM/DICOMweb is the imaging interoperability contract. Patient 360 is a derived application read model: it stores imaging relationships and metadata, not diagnostic pixel payloads.
 
-Persistence is deliberately polyglot: PostgreSQL holds relational identity, alias, consent/audit and ingestion metadata; MongoDB preserves complete versioned FHIR documents; Redis is reserved for disposable, rebuildable Patient 360 projections and is never authoritative clinical storage.
+Persistence is deliberately polyglot:
 
-All versioned architecture and process diagrams use Mermaid. See [`docs/architecture/system-architecture.md`](docs/architecture/system-architecture.md) for the full architecture, [`docs/architecture/ingestion-persistence.md`](docs/architecture/ingestion-persistence.md) for persistence boundaries and [`docs/architecture/requirements.md`](docs/architecture/requirements.md) for the functional and non-functional requirements.
+- PostgreSQL holds relational identity, alias, consent/audit and ingestion metadata;
+- MongoDB preserves complete versioned FHIR documents and diagnostic reports;
+- PACS/VNA owns DICOM studies, series, instances and imaging lifecycle;
+- S3-compatible object storage holds large DICOM binary objects behind the PACS/VNA boundary;
+- Redis holds disposable, rebuildable Patient 360 projections and is never authoritative clinical storage.
+
+All versioned architecture and process diagrams use Mermaid. See [`docs/architecture/system-architecture.md`](docs/architecture/system-architecture.md), [`docs/architecture/imaging.md`](docs/architecture/imaging.md), [`docs/architecture/ingestion-persistence.md`](docs/architecture/ingestion-persistence.md) and [`docs/architecture/requirements.md`](docs/architecture/requirements.md).
 
 ## Initial clinical scope
 
-The first release covers:
-
-- patient identity;
-- encounters;
-- active and historical conditions;
-- medication;
-- allergies;
-- laboratory observations and diagnostic reports;
-- procedures;
-- immunisations;
-- appointments, referrals and service requests;
-- documents;
-- consent;
-- provenance and audit events.
-
-## v0.1.0 target
-
-The first demonstrable milestone will reconstruct one synthetic patient journey from at least four simulated source systems:
-
-1. primary care;
-2. hospital;
-3. laboratory;
-4. pharmacy.
-
-The resulting API must expose a Patient 360 summary and unified timeline with source provenance.
+The first release covers patient identity, encounters, active and historical conditions, medication, allergies, laboratory observations and diagnostic reports, procedures, immunisations, appointments/referrals, documents, diagnostic imaging references, consent, provenance and audit events.
 
 ## Engineering principles
 
 - Python 3.11+
 - FastAPI and Pydantic
+- HL7 FHIR for clinical exchange
+- DICOM/DICOMweb for diagnostic imaging
 - PostgreSQL for relational identity and audit metadata
 - MongoDB for complete versioned FHIR documents
+- PACS/VNA for imaging lifecycle
+- S3-compatible object storage for DICOM bulk objects
 - Redis for non-authoritative Patient 360 caching
 - Docker Compose for local orchestration
 - typed Python with strict `mypy`
@@ -107,15 +110,18 @@ services/
   api/
   ingestion/
   patient-state/
+  imaging/
   audit/
 packages/
   fhir/
+  dicom/
   clinical-model/
 synthetic/
   primary-care/
   hospital/
   laboratory/
   pharmacy/
+  imaging/
 docs/
   architecture/
   data-model/
@@ -123,7 +129,5 @@ docs/
   adr/
 tests/
 ```
-
-The directories will be introduced as their corresponding milestones become executable rather than populated with empty placeholders.
 
 See [`ROADMAP.md`](ROADMAP.md) for the implementation sequence.

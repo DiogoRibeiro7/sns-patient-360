@@ -2,21 +2,22 @@
 
 ## Purpose
 
-SNS Patient 360 reconstructs a unified longitudinal patient view from fragmented clinical source systems while preserving the clinical meaning, provenance, consent context and auditability of the source records.
+SNS Patient 360 reconstructs a unified longitudinal patient view from fragmented clinical source systems while preserving clinical meaning, provenance, consent context and auditability.
 
-The platform does not replace source clinical systems. HL7 FHIR is the interoperability boundary, while Patient 360 is a derived read model optimised for clinician and patient-facing queries.
+The platform does not replace source clinical systems. HL7 FHIR is the clinical interoperability boundary. DICOM/DICOMweb is the diagnostic-imaging interoperability boundary. Patient 360 is a derived read model optimised for clinician and patient-facing queries.
 
 All architecture diagrams in this repository are expressed as Mermaid inside versioned Markdown documents.
 
 ## Architectural principles
 
-1. **FHIR remains the source and interchange truth.** Patient 360 does not redefine the semantics of source clinical resources.
-2. **Derived state is traceable.** Every derived Patient 360 item must link to the FHIR resources that support it.
-3. **Conflicts are preserved.** Conflicting or superseded clinical facts must not be silently overwritten.
-4. **Clinical state is temporal.** Current state and historical facts are distinct concepts.
-5. **Access is auditable.** Reads and transformations of clinical information must be attributable.
-6. **Synthetic data only.** The reference implementation must not contain real patient data.
-7. **AI is not part of the clinical truth layer.** Diagnosis and autonomous treatment recommendations are out of scope.
+1. **FHIR remains the clinical source/interchange truth.** Patient 360 does not redefine source clinical semantics.
+2. **DICOM remains the diagnostic-imaging truth.** Image pixels and DICOM lifecycle do not belong in MongoDB or the Patient 360 read model.
+3. **Derived state is traceable.** Every derived Patient 360 item must link to its supporting FHIR and/or imaging source.
+4. **Conflicts are preserved.** Conflicting or superseded clinical facts must not be silently overwritten.
+5. **Clinical state is temporal.** Current state and historical facts are distinct concepts.
+6. **Access is auditable.** Reads, transformations and imaging retrieval must be attributable.
+7. **Synthetic data only.** The reference implementation must not contain real patient data.
+8. **AI is not part of the clinical truth layer.** Diagnosis and autonomous treatment recommendations are out of scope.
 
 ## System context
 
@@ -26,16 +27,20 @@ flowchart LR
     HOSP[Hospital System]
     LAB[Laboratory System]
     PHARM[Pharmacy System]
+    MOD[Imaging Modalities]
 
     P360[SNS Patient 360]
+    PACS[PACS / VNA]
     CLINICIAN[Clinician]
     PATIENT[Patient]
     AUDITOR[Auditor / Security Reviewer]
 
-    PC -->|FHIR resources| P360
-    HOSP -->|FHIR resources| P360
-    LAB -->|FHIR resources| P360
-    PHARM -->|FHIR resources| P360
+    PC -->|FHIR| P360
+    HOSP -->|FHIR| P360
+    LAB -->|FHIR| P360
+    PHARM -->|FHIR| P360
+    MOD -->|DICOM| PACS
+    PACS -->|DICOMweb + imaging references| P360
 
     P360 -->|Longitudinal clinical view| CLINICIAN
     P360 -->|Patient-facing health view| PATIENT
@@ -51,103 +56,149 @@ flowchart TB
         HOSP[Hospital]
         LAB[Laboratory]
         PHARM[Pharmacy]
+        MOD[Imaging Modalities]
     end
 
-    subgraph Interop[Interoperability boundary]
-        API[FHIR API]
-        VALIDATE[Validation and Normalisation]
+    subgraph Interop[Interoperability boundaries]
+        FHIRAPI[FHIR API]
+        VALIDATE[FHIR Validation / Normalisation]
+        DICOM[DICOM / DICOMweb Gateway]
     end
 
-    subgraph Clinical[Clinical data layer]
-        FHIRSTORE[(FHIR Clinical Store)]
-        PROV[Provenance Service]
-        AUDIT[Audit Service]
+    subgraph Truth[Authoritative data planes]
+        PG[(PostgreSQL\nIdentity / governance metadata)]
+        MONGO[(MongoDB\nVersioned FHIR documents)]
+        PACS[(PACS / VNA\nDICOM catalogue)]
+        OBJECT[(S3-compatible Object Storage\nDICOM bulk objects)]
     end
 
     subgraph ReadModel[Patient 360 layer]
         STATE[Patient State Engine]
-        P360STORE[(Patient 360 Read Model)]
+        REDIS[(Redis\nDisposable projection cache)]
     end
 
     subgraph Experience[Experience layer]
-        CLINAPI[Patient 360 API]
+        API[Patient 360 API]
         CLINWEB[Clinician Web]
         PATWEB[Patient Web]
+        VIEWER[DICOM Viewer]
     end
 
-    Sources -->|FHIR bundles / resources| API
-    API --> VALIDATE
-    VALIDATE -->|Validated canonical resources| FHIRSTORE
-    VALIDATE -->|Source and ingestion metadata| PROV
-    VALIDATE -->|Ingestion audit events| AUDIT
+    PC --> FHIRAPI
+    HOSP --> FHIRAPI
+    LAB --> FHIRAPI
+    PHARM --> FHIRAPI
+    HOSP --> DICOM
+    MOD --> DICOM
 
-    FHIRSTORE --> STATE
-    PROV --> STATE
-    STATE --> P360STORE
-    STATE -->|Derivation records| PROV
+    FHIRAPI --> VALIDATE
+    VALIDATE --> PG
+    VALIDATE --> MONGO
 
-    P360STORE --> CLINAPI
-    CLINAPI --> CLINWEB
-    CLINAPI --> PATWEB
-    CLINAPI -->|Access events| AUDIT
+    DICOM --> PACS
+    PACS --> OBJECT
+
+    PG --> STATE
+    MONGO --> STATE
+    PACS --> STATE
+    STATE --> REDIS
+    STATE --> API
+    REDIS --> API
+
+    API --> CLINWEB
+    API --> PATWEB
+    CLINWEB --> VIEWER
+    VIEWER --> DICOM
 ```
 
-## Ingestion and derivation sequence
+## Clinical ingestion and derivation
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Source as Source System
-    participant API as FHIR API
+    participant Source as Clinical Source
+    participant FHIR as FHIR API
     participant Validation as Validation Layer
-    participant Store as FHIR Store
-    participant Provenance as Provenance Service
+    participant PG as PostgreSQL
+    participant Mongo as MongoDB
     participant State as Patient State Engine
-    participant ReadModel as Patient 360 Read Model
-    participant Audit as Audit Service
+    participant Audit as Audit Ledger
 
-    Source->>API: Submit FHIR resources
-    API->>Validation: Validate structure and supported semantics
+    Source->>FHIR: Submit FHIR resources
+    FHIR->>Validation: Validate supported semantics
 
     alt Valid resource
-        Validation->>Store: Persist canonical source resource
-        Validation->>Provenance: Record source and ingestion provenance
-        Validation->>Audit: Record successful ingestion
-        Store->>State: Make validated resource available
-        Provenance->>State: Provide provenance links
-        State->>ReadModel: Recompute affected patient state
-        State->>Provenance: Record derivation provenance
+        Validation->>PG: Resolve identity / governance metadata
+        Validation->>Mongo: Persist versioned FHIR document
+        Validation->>Audit: Record ingestion outcome
+        PG->>State: Identity / alias metadata
+        Mongo->>State: Clinical documents
+        State->>State: Recompute affected Patient 360 projection
     else Invalid resource
         Validation->>Audit: Record rejected ingestion
-        Validation-->>API: Return validation errors
-        API-->>Source: Reject resource
+        Validation-->>FHIR: Structured validation errors
     end
+```
+
+## Imaging ingestion and retrieval
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Modality as Imaging Modality
+    participant DICOM as DICOMweb Gateway
+    participant PACS as PACS/VNA
+    participant Object as Object Storage
+    participant FHIR as FHIR Layer
+    participant P360 as Patient 360
+    participant Viewer as DICOM Viewer
+
+    Modality->>DICOM: DICOM C-STORE or STOW-RS
+    DICOM->>PACS: Register study / series / instances
+    PACS->>Object: Persist DICOM binary objects
+    PACS->>FHIR: Associate ImagingStudy / report metadata
+    FHIR->>P360: Add study to longitudinal record
+    P360->>Viewer: Open authorised imaging study
+    Viewer->>DICOM: QIDO-RS / WADO-RS
+    DICOM->>PACS: Resolve study / series / instance
+    PACS->>Object: Retrieve DICOM objects
+    Object-->>PACS: Binary DICOM data
+    PACS-->>Viewer: DICOMweb response
 ```
 
 ## Patient 360 derivation boundary
 
 ```mermaid
 flowchart LR
-    subgraph FHIR[FHIR clinical truth]
+    subgraph Clinical[FHIR clinical truth]
         PAT[Patient]
         ENC[Encounter]
         COND[Condition]
         OBS[Observation]
-        MED[MedicationRequest]
+        MED[Medication]
         ALLERGY[AllergyIntolerance]
         PROC[Procedure]
         SR[ServiceRequest]
         DOC[DocumentReference]
+        REPORT[DiagnosticReport]
+        IMGSTUDY[ImagingStudy]
         PROV[Provenance]
+    end
+
+    subgraph Imaging[DICOM imaging truth]
+        STUDY[DICOM Study]
+        SERIES[DICOM Series]
+        INSTANCE[DICOM Instances / Frames]
     end
 
     ENGINE[Deterministic Patient State Engine]
 
-    subgraph P360[Patient 360 derived read model]
+    subgraph Read[Patient 360 derived model]
         ID[Identity]
         ACTIVE[Active Clinical State]
         TIMELINE[Longitudinal Timeline]
         TRENDS[Laboratory Trends]
+        IMAGING[Imaging Study References]
         PENDING[Pending Care]
         SOURCES[Source Traceability]
     end
@@ -161,15 +212,24 @@ flowchart LR
     PROC --> ENGINE
     SR --> ENGINE
     DOC --> ENGINE
+    REPORT --> ENGINE
+    IMGSTUDY --> ENGINE
     PROV --> ENGINE
+    STUDY --> ENGINE
 
     ENGINE --> ID
     ENGINE --> ACTIVE
     ENGINE --> TIMELINE
     ENGINE --> TRENDS
+    ENGINE --> IMAGING
     ENGINE --> PENDING
     ENGINE --> SOURCES
+
+    SERIES --> STUDY
+    INSTANCE --> SERIES
 ```
+
+Patient 360 derives imaging references and summary metadata; the DICOM study/series/instance hierarchy remains authoritative in the PACS/VNA.
 
 ## Authentication, authorisation, consent and audit
 
@@ -177,11 +237,13 @@ flowchart LR
 flowchart TD
     USER[Clinician or Patient]
     AUTH[OIDC / OAuth2 Identity Provider]
-    RBAC[Role and Scope Evaluation]
-    CONSENT[Consent Policy Evaluation]
+    RBAC[Role / Scope Evaluation]
+    CONSENT[Consent / Purpose Policy]
     API[Patient 360 API]
-    DATA[(Patient 360 Read Model)]
-    FHIR[(FHIR Clinical Store)]
+    DATA[(Patient 360 Projection)]
+    FHIR[(FHIR Document Store)]
+    DICOM[DICOMweb Gateway]
+    VIEWER[DICOM Viewer]
     AUDIT[(Append-oriented Audit Log)]
 
     USER --> AUTH
@@ -189,8 +251,11 @@ flowchart TD
     RBAC --> CONSENT
     CONSENT -->|Authorised request| API
     API --> DATA
-    API -->|Source drill-down when authorised| FHIR
-    API -->|Actor, purpose, resource, outcome, timestamp| AUDIT
+    API -->|Clinical source drill-down| FHIR
+    API -->|Authorised imaging context| VIEWER
+    VIEWER --> DICOM
+    API --> AUDIT
+    VIEWER --> AUDIT
     CONSENT -->|Denied request| AUDIT
 ```
 
@@ -198,38 +263,47 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-    subgraph External[External / simulated source boundary]
-        SOURCES[Clinical Source Systems]
+    subgraph External[External / simulated sources]
+        CLINSRC[Clinical Source Systems]
+        MODALITIES[Imaging Modalities]
     end
 
-    subgraph Platform[SNS Patient 360 platform boundary]
+    subgraph Platform[SNS Patient 360 platform]
         FHIRAPI[FHIR API]
-        VALIDATION[Validation]
-        STORE[(Clinical Store)]
+        DICOM[DICOMweb Gateway]
+        PG[(PostgreSQL)]
+        MONGO[(MongoDB)]
+        PACS[(PACS / VNA)]
+        OBJECT[(Object Storage)]
         STATE[Patient State Engine]
-        P360[(Patient 360 Read Model)]
+        REDIS[(Redis)]
         AUDIT[(Audit Store)]
     end
 
     subgraph Clients[Client boundary]
-        CLINICIAN[Clinician Client]
+        CLINICIAN[Clinician Client / Viewer]
         PATIENT[Patient Client]
     end
 
-    SOURCES -->|Validated authenticated channel| FHIRAPI
-    FHIRAPI --> VALIDATION
-    VALIDATION --> STORE
-    STORE --> STATE
-    STATE --> P360
-    VALIDATION --> AUDIT
-    P360 --> CLINICIAN
-    P360 --> PATIENT
+    CLINSRC --> FHIRAPI
+    MODALITIES --> DICOM
+    FHIRAPI --> PG
+    FHIRAPI --> MONGO
+    DICOM --> PACS
+    PACS --> OBJECT
+    PG --> STATE
+    MONGO --> STATE
+    PACS --> STATE
+    STATE --> REDIS
+    STATE --> CLINICIAN
+    STATE --> PATIENT
+    CLINICIAN --> DICOM
+    FHIRAPI --> AUDIT
+    DICOM --> AUDIT
     CLINICIAN --> AUDIT
     PATIENT --> AUDIT
 ```
 
 ## Architecture-to-requirements relationship
 
-The architecture is governed by the requirements in [`requirements.md`](requirements.md). Functional requirements define observable platform behaviour. Non-functional requirements define the quality, safety, interoperability and operational constraints under which that behaviour must be delivered.
-
-Implementation PRs should reference the requirement IDs they satisfy and add verification at the appropriate level: unit, contract, integration, security or performance testing.
+The architecture is governed by [`requirements.md`](requirements.md). Diagnostic imaging requirements explicitly distinguish FHIR metadata from DICOM pixel storage and retrieval. Implementation PRs should reference the requirement IDs they satisfy and add verification at the appropriate level: unit, contract, integration, security or performance testing.

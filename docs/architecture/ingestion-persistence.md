@@ -1,12 +1,14 @@
-# FHIR ingestion and canonical longitudinal persistence
+# Clinical ingestion, imaging and persistence
 
 ## Scope
 
-This milestone implements the boundary between independent source bundles and the canonical clinical store. It does not yet derive the Patient 360 read model.
+SNS Patient 360 has multiple authoritative data planes because clinical documents and diagnostic imaging have different storage and protocol semantics.
 
-Implements: `FR-001`, `FR-010`, `FR-011`, `FR-012`, `FR-013`, `FR-014`, `FR-020`, `NFR-020`, `NFR-021`, `NFR-022`, `NFR-023`, `NFR-042`.
+- FHIR clinical documents use PostgreSQL + MongoDB.
+- Diagnostic images use DICOM/DICOMweb + PACS/VNA + object storage.
+- Redis stores only rebuildable Patient 360 projections.
 
-## Ingestion flow
+## Clinical FHIR ingestion
 
 ```mermaid
 sequenceDiagram
@@ -18,139 +20,165 @@ sequenceDiagram
     participant Mongo as MongoDB FHIR Document Store
     participant Ledger as Ingestion Event Ledger
 
-    Source->>Validator: Submit collection Bundle
-    Validator->>Validator: Validate resource shape, ids, source and synthetic markers
+    Source->>Validator: Submit FHIR Bundle
+    Validator->>Validator: Validate resource shape and source semantics
 
     alt Bundle invalid
         Validator->>Ledger: Append rejected event
-        Validator-->>Source: Structured rejection
     else Bundle valid
-        Validator->>Resolver: Source-local Patient + shared synthetic identifier
-        Resolver->>SQL: Resolve/create canonical patient
-        Resolver->>SQL: Attach source-local alias
-        loop Each resource version
-            Mongo->>Mongo: Check source × type × id × version
-            alt Exact resource version already stored
-                Mongo->>Mongo: Count duplicate
-            else New resource version
-                Mongo->>Mongo: Append complete FHIR document
-            end
+        Validator->>Resolver: Source-local Patient + shared identifier
+        Resolver->>SQL: Resolve/create canonical patient and alias
+        loop Every resource version, including safe replay
+            Validator->>Mongo: Atomic source-version upsert
         end
-        SQL->>Ledger: Mark ingestion committed
+        SQL->>Ledger: Mark accepted or partial/recovery state
     end
 ```
 
-## Polyglot persistence architecture
+## Imaging ingestion
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Modality as Imaging Modality
+    participant DICOM as DICOM/DICOMweb Gateway
+    participant PACS as PACS/VNA
+    participant Object as S3-compatible Object Storage
+    participant FHIR as FHIR Clinical Layer
+
+    Modality->>DICOM: DICOM C-STORE / STOW-RS
+    DICOM->>PACS: Register study / series / instances
+    PACS->>Object: Store DICOM objects
+    PACS->>FHIR: Associate ImagingStudy / Endpoint metadata
+    FHIR->>FHIR: Link DiagnosticReport where available
+```
+
+The Patient 360 service does not write DICOM files directly to object storage. The PACS/VNA owns DICOM lifecycle and object-storage interaction.
+
+## Authoritative data-plane architecture
 
 ```mermaid
 flowchart TB
-    API[FHIR Ingestion Service]
-    RESOLVE[Identity Resolver]
+    FHIRAPI[FHIR Ingestion Service]
+    DICOM[DICOM / DICOMweb Gateway]
     STATE[Patient State Engine]
-    READ[Patient 360 API]
+    API[Patient 360 API]
 
     PG[(PostgreSQL)]
     MONGO[(MongoDB)]
+    PACS[(PACS / VNA)]
+    OBJECT[(Object Storage)]
     REDIS[(Redis)]
 
-    API --> RESOLVE
-    RESOLVE --> PG
-    API --> MONGO
+    FHIRAPI --> PG
+    FHIRAPI --> MONGO
+
+    DICOM --> PACS
+    PACS --> OBJECT
 
     PG --> STATE
     MONGO --> STATE
-    STATE --> REDIS
-    STATE --> READ
-    REDIS --> READ
+    PACS --> STATE
 
-    PG -. identity, aliases, consent/audit, ingestion state .-> PG
+    STATE --> REDIS
+    STATE --> API
+    REDIS --> API
+
+    PG -. identity / aliases / consent / audit metadata .-> PG
     MONGO -. complete versioned FHIR documents .-> MONGO
-    REDIS -. disposable derived projections only .-> REDIS
+    PACS -. DICOM catalogue / UIDs / lifecycle .-> PACS
+    OBJECT -. DICOM bulk binary objects .-> OBJECT
+    REDIS -. disposable projections only .-> REDIS
 ```
 
 ### PostgreSQL responsibility
 
-PostgreSQL owns data with strong relational constraints:
-
-- canonical patient identity;
-- source-local patient aliases;
-- consent and access-control metadata as introduced;
-- ingestion coordination state;
-- audit/ingestion ledger metadata.
+PostgreSQL owns data with strong relational constraints: canonical patient identity, source aliases, consent/access metadata, ingestion coordination and audit metadata.
 
 ### MongoDB responsibility
 
-MongoDB owns complete clinical source documents:
+MongoDB owns complete FHIR clinical source documents and reports, preserving nested FHIR structure and source versions. It may contain `ImagingStudy`, `Endpoint` and `DiagnosticReport` resources, but not authoritative diagnostic image pixels.
 
-- FHIR payloads are stored without flattening their nested structure;
-- source-version identity is `(source, resourceType, id, versionId)`;
-- exact replay is idempotent;
-- a different payload under the same source-version key is rejected;
-- new source versions are appended rather than overwriting history;
-- documents remain queryable by canonical patient id and resource type.
+### PACS/VNA responsibility
+
+The PACS/VNA owns DICOM study, series and instance cataloguing, DICOM UIDs, image lifecycle, DICOM/DICOMweb operations and retrieval semantics.
+
+### Object-storage responsibility
+
+S3-compatible object storage owns large DICOM binary objects behind the PACS/VNA. Patient 360 application services must not make clinical decisions or viewer links from raw bucket/object keys.
 
 ### Redis responsibility
 
-Redis is reserved for rebuildable Patient 360 projections and cache entries. It is explicitly non-authoritative: deletion or total Redis loss must not destroy clinical truth, because projections can be reconstructed from PostgreSQL plus MongoDB.
+Redis contains only rebuildable Patient 360 projections and cache entries. Redis loss must not cause loss of clinical documents or DICOM studies.
 
-## Identity-resolution boundary
+## Patient identity across clinical and imaging planes
 
 ```mermaid
 flowchart LR
-    PC[Primary Care Patient<br/>USF-*]
-    H[Hospital Patient<br/>HOSP-*]
-    L[Laboratory Patient<br/>LAB-*]
-    P[Pharmacy Patient<br/>PHARM-*]
-
-    ID[Shared synthetic identifier]
-    RESOLVE[Deterministic Identity Resolver]
+    FHIRPAT[Source FHIR Patient]
+    DICOMPT[DICOM Patient / Study identifiers]
+    RESOLVE[Canonical Identity Resolution]
     CANON[Canonical Patient ID]
-    PG[(PostgreSQL aliases)]
-    MONGO[(MongoDB FHIR documents)]
 
-    PC --> ID
-    H --> ID
-    L --> ID
-    P --> ID
-    ID --> RESOLVE
+    FHIRPAT --> RESOLVE
+    DICOMPT --> RESOLVE
     RESOLVE --> CANON
-    CANON --> PG
-    CANON --> MONGO
+
+    CANON --> PG[(PostgreSQL aliases)]
+    CANON --> MONGO[(FHIR documents)]
+    CANON --> PACS[(Imaging study references)]
 ```
 
-The current resolver intentionally uses the explicit shared synthetic identifier. Probabilistic or demographic record linkage is out of scope and must not be introduced silently.
+The synthetic reference implementation starts from deterministic identifiers. More complex patient matching must be introduced explicitly and must not silently merge uncertain identities.
 
-## Cross-database consistency
+## Cross-database recovery
 
-PostgreSQL and MongoDB do not share one implicit ACID transaction boundary. The architecture therefore uses a recoverable idempotent protocol rather than pretending distributed atomicity exists.
+PostgreSQL and MongoDB do not share a single ACID transaction. Clinical ingestion therefore uses deterministic source-version keys, partial-ingestion state, idempotent replay and reconciliation.
 
 ```mermaid
 stateDiagram-v2
     [*] --> Received
-    Received --> Validated: validation succeeds
+    Received --> Validated: FHIR validation succeeds
     Received --> Rejected: validation fails
-    Validated --> IdentityCommitted: canonical identity / alias committed
-    IdentityCommitted --> DocumentsCommitted: FHIR document versions written
-    DocumentsCommitted --> Committed: ingestion ledger finalised
-
-    IdentityCommitted --> RecoveryRequired: document write interrupted
-    RecoveryRequired --> DocumentsCommitted: safe replay / reconciliation
+    Validated --> IdentityCommitted
+    IdentityCommitted --> DocumentsCommitted
+    DocumentsCommitted --> Committed
+    IdentityCommitted --> RecoveryRequired: Mongo write interrupted
+    RecoveryRequired --> DocumentsCommitted: safe replay
     Rejected --> [*]
     Committed --> [*]
 ```
 
-Deterministic source-version keys and idempotent replay make partial operations recoverable. The application must not expose an ingestion operation as fully committed until both the relational metadata and required MongoDB document writes have succeeded.
+The DICOM/PACS/object-storage plane has its own storage lifecycle. A bulk-storage outage may temporarily prevent image retrieval, but it must not corrupt PostgreSQL identity data or MongoDB clinical documents.
 
 ## Local development
 
 `docker-compose.yml` provides:
 
-- PostgreSQL for relational state;
+- PostgreSQL for relational identity/governance state;
 - MongoDB for FHIR documents;
-- Redis for disposable projection caching.
+- Redis for disposable projection caching;
+- Orthanc as the reference PACS/DICOMweb gateway;
+- MinIO as S3-compatible DICOM bulk storage behind Orthanc.
 
-Unit tests may use isolated in-memory/test doubles so the default CI suite remains independent of external healthcare systems. Database integration tests should use the real services in dedicated integration workflows.
+Published development ports bind to loopback. Default CI remains independent of external clinical services; dedicated integration tests can exercise the real Docker services.
 
-## Next boundary
+## Patient State Engine boundary
 
-The Patient State Engine will consume PostgreSQL identity metadata plus MongoDB FHIR documents and produce rebuildable Patient 360 projections. Redis may accelerate those reads but must never become the only copy of clinically significant state.
+```mermaid
+flowchart LR
+    PG[(PostgreSQL Identity)]
+    MONGO[(MongoDB FHIR)]
+    PACS[(PACS Imaging Catalogue)]
+    ENGINE[Patient State Engine]
+    REDIS[(Redis Cache)]
+    READ[Patient 360 API]
+
+    PG --> ENGINE
+    MONGO --> ENGINE
+    PACS --> ENGINE
+    ENGINE --> REDIS
+    ENGINE --> READ
+```
+
+The Patient State Engine consumes metadata and references from the imaging plane. It must not download DICOM pixel payloads merely to construct the Patient 360 summary or timeline.
