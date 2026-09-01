@@ -15,7 +15,7 @@ class _Cursor:
     def __init__(self, documents: list[dict[str, Any]]) -> None:
         self._documents = documents
 
-    def sort(self, _: list[tuple[str, int]]) -> "_Cursor":
+    def sort(self, _: list[tuple[str, int]]) -> _Cursor:
         return self
 
     def __iter__(self):  # type: ignore[no-untyped-def]
