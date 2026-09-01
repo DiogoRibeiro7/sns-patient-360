@@ -1,0 +1,50 @@
+name: Sync repository labels
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/repository-metadata.json
+      - .github/workflows/sync-labels.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  sync-labels:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Synchronize labels
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          jq -c '.labels[]' .github/repository-metadata.json | while read -r label; do
+            name=$(jq -r '.name' <<<"$label")
+            color=$(jq -r '.color' <<<"$label")
+            description=$(jq -r '.description' <<<"$label")
+
+            if gh api "repos/$GH_REPO/labels/$name" >/dev/null 2>&1; then
+              gh api \
+                --method PATCH \
+                "repos/$GH_REPO/labels/$name" \
+                -f new_name="$name" \
+                -f color="$color" \
+                -f description="$description" \
+                >/dev/null
+            else
+              gh api \
+                --method POST \
+                "repos/$GH_REPO/labels" \
+                -f name="$name" \
+                -f color="$color" \
+                -f description="$description" \
+                >/dev/null
+            fi
+          done
