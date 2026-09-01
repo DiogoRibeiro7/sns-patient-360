@@ -8,9 +8,9 @@ from io import BytesIO
 
 from pydicom.dataset import FileDataset, FileMetaDataset
 from pydicom.uid import (
+    PYDICOM_IMPLEMENTATION_UID,
     DigitalXRayImageStorageForPresentation,
     ExplicitVRLittleEndian,
-    PYDICOM_IMPLEMENTATION_UID,
     generate_uid,
 )
 
