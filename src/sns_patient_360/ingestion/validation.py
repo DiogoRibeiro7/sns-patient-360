@@ -17,6 +17,8 @@ SUPPORTED_RESOURCE_TYPES: frozenset[str] = frozenset(
         "Condition",
         "Observation",
         "DiagnosticReport",
+        "ImagingStudy",
+        "Endpoint",
         "MedicationRequest",
         "MedicationDispense",
         "AllergyIntolerance",
@@ -31,6 +33,10 @@ SUPPORTED_RESOURCE_TYPES: frozenset[str] = frozenset(
         "AuditEvent",
     }
 )
+
+# Endpoint describes a service connection and is referenced by patient-scoped resources;
+# it is not itself required to carry Patient.subject.
+SUBJECT_EXEMPT_RESOURCE_TYPES: frozenset[str] = frozenset({"Endpoint"})
 
 
 class FHIRValidationError(ValueError):
@@ -96,12 +102,13 @@ def validate_bundle(bundle: dict[str, Any]) -> tuple[str, str, list[dict[str, An
         raise FHIRValidationError("Bundle requires one source system and one Patient")
 
     for resource in resources:
-        if resource["resourceType"] == "Patient":
+        resource_type = str(resource["resourceType"])
+        if resource_type == "Patient" or resource_type in SUBJECT_EXEMPT_RESOURCE_TYPES:
             continue
         subject = resource.get("subject")
         if not isinstance(subject, dict) or subject.get("reference") != f"Patient/{patient_id}":
             raise FHIRValidationError(
-                f"{resource['resourceType']}/{resource['id']} must reference Patient/{patient_id}"
+                f"{resource_type}/{resource['id']} must reference Patient/{patient_id}"
             )
 
     return source_system, patient_id, resources
