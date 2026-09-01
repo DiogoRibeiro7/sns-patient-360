@@ -52,7 +52,11 @@ def test_laboratory_source_contains_longitudinal_hba1c() -> None:
     journey = generate_journey()
     laboratory = next(bundle for bundle in journey.sources if bundle.source == "laboratory")
 
-    hba1c = [resource for resource in laboratory.resources if resource.payload.get("code") == "HbA1c"]
+    hba1c = [
+        resource
+        for resource in laboratory.resources
+        if resource.payload.get("code") == "HbA1c"
+    ]
 
     assert len(hba1c) == 2
     assert [resource.payload["value"] for resource in hba1c] == [7.4, 6.8]
