@@ -14,6 +14,7 @@ FHIR is the interoperability contract. The Patient 360 application model is a se
 | `Observation` | Laboratory values, vital signs and measured clinical facts |
 | `DiagnosticReport` | Laboratory and diagnostic report containers |
 | `MedicationRequest` | Prescribed medication |
+| `MedicationDispense` | Dispensing events from pharmacy systems |
 | `AllergyIntolerance` | Allergies and intolerances |
 | `Immunization` | Vaccination history |
 | `Procedure` | Clinical and surgical procedures |
@@ -33,6 +34,7 @@ FHIR is the interoperability contract. The Patient 360 application model is a se
 4. Conflicting source records are preserved and surfaced rather than silently overwritten.
 5. Clinical state is time-dependent; the system must distinguish current state from historical facts.
 6. Terminology bindings and Portuguese implementation profiles will be introduced explicitly rather than guessed.
+7. Resource versions are append-preserved using source, resource type, resource id and version id as the source-version identity.
 
 ## Patient 360 read model
 
@@ -66,6 +68,7 @@ flowchart LR
         C[Condition]
         O[Observation]
         MR[MedicationRequest]
+        MD[MedicationDispense]
         AI[AllergyIntolerance]
         PR[Procedure]
         SR[ServiceRequest]
@@ -88,6 +91,7 @@ flowchart LR
     C --> ENGINE
     O --> ENGINE
     MR --> ENGINE
+    MD --> ENGINE
     AI --> ENGINE
     PR --> ENGINE
     SR --> ENGINE
