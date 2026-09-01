@@ -14,30 +14,84 @@ sequenceDiagram
     participant Source as Source FHIR Bundle
     participant Validator as FHIR Validator
     participant Resolver as Identity Resolver
-    participant Store as Canonical Clinical Store
+    participant SQL as PostgreSQL Identity / Audit Store
+    participant Mongo as MongoDB FHIR Document Store
     participant Ledger as Ingestion Event Ledger
 
     Source->>Validator: Submit collection Bundle
-    Validator->>Validator: Check resource type, ids, source, synthetic tag and subject references
+    Validator->>Validator: Validate resource shape, ids, source and synthetic markers
 
     alt Bundle invalid
         Validator->>Ledger: Append rejected event
         Validator-->>Source: Structured rejection
     else Bundle valid
         Validator->>Resolver: Source-local Patient + shared synthetic identifier
-        Resolver->>Store: Resolve/create canonical patient
-        Resolver->>Store: Attach source-local alias
+        Resolver->>SQL: Resolve/create canonical patient
+        Resolver->>SQL: Attach source-local alias
         loop Each resource version
-            Store->>Store: Check source × type × id × version
+            Mongo->>Mongo: Check source × type × id × version
             alt Exact resource version already stored
-                Store->>Store: Count duplicate
+                Mongo->>Mongo: Count duplicate
             else New resource version
-                Store->>Store: Append canonical source resource
+                Mongo->>Mongo: Append complete FHIR document
             end
         end
-        Store->>Ledger: Append accepted event
+        SQL->>Ledger: Mark ingestion committed
     end
 ```
+
+## Polyglot persistence architecture
+
+```mermaid
+flowchart TB
+    API[FHIR Ingestion Service]
+    RESOLVE[Identity Resolver]
+    STATE[Patient State Engine]
+    READ[Patient 360 API]
+
+    PG[(PostgreSQL)]
+    MONGO[(MongoDB)]
+    REDIS[(Redis)]
+
+    API --> RESOLVE
+    RESOLVE --> PG
+    API --> MONGO
+
+    PG --> STATE
+    MONGO --> STATE
+    STATE --> REDIS
+    STATE --> READ
+    REDIS --> READ
+
+    PG -. identity, aliases, consent/audit, ingestion state .-> PG
+    MONGO -. complete versioned FHIR documents .-> MONGO
+    REDIS -. disposable derived projections only .-> REDIS
+```
+
+### PostgreSQL responsibility
+
+PostgreSQL owns data with strong relational constraints:
+
+- canonical patient identity;
+- source-local patient aliases;
+- consent and access-control metadata as introduced;
+- ingestion coordination state;
+- audit/ingestion ledger metadata.
+
+### MongoDB responsibility
+
+MongoDB owns complete clinical source documents:
+
+- FHIR payloads are stored without flattening their nested structure;
+- source-version identity is `(source, resourceType, id, versionId)`;
+- exact replay is idempotent;
+- a different payload under the same source-version key is rejected;
+- new source versions are appended rather than overwriting history;
+- documents remain queryable by canonical patient id and resource type.
+
+### Redis responsibility
+
+Redis is reserved for rebuildable Patient 360 projections and cache entries. It is explicitly non-authoritative: deletion or total Redis loss must not destroy clinical truth, because projections can be reconstructed from PostgreSQL plus MongoDB.
 
 ## Identity-resolution boundary
 
@@ -51,6 +105,8 @@ flowchart LR
     ID[Shared synthetic identifier]
     RESOLVE[Deterministic Identity Resolver]
     CANON[Canonical Patient ID]
+    PG[(PostgreSQL aliases)]
+    MONGO[(MongoDB FHIR documents)]
 
     PC --> ID
     H --> ID
@@ -58,74 +114,43 @@ flowchart LR
     P --> ID
     ID --> RESOLVE
     RESOLVE --> CANON
-
-    CANON --> A1[Alias: primary-care → USF-*]
-    CANON --> A2[Alias: hospital → HOSP-*]
-    CANON --> A3[Alias: laboratory → LAB-*]
-    CANON --> A4[Alias: pharmacy → PHARM-*]
+    CANON --> PG
+    CANON --> MONGO
 ```
 
-The current resolver intentionally uses the explicit shared synthetic identifier. Probabilistic or demographic record linkage is out of scope for this milestone and must not be introduced silently.
+The current resolver intentionally uses the explicit shared synthetic identifier. Probabilistic or demographic record linkage is out of scope and must not be introduced silently.
 
-## Persistence model
+## Cross-database consistency
+
+PostgreSQL and MongoDB do not share one implicit ACID transaction boundary. The architecture therefore uses a recoverable idempotent protocol rather than pretending distributed atomicity exists.
 
 ```mermaid
-erDiagram
-    CANONICAL_PATIENT ||--o{ SOURCE_ALIAS : has
-    CANONICAL_PATIENT ||--o{ CLINICAL_RESOURCE : owns
+stateDiagram-v2
+    [*] --> Received
+    Received --> Validated: validation succeeds
+    Received --> Rejected: validation fails
+    Validated --> IdentityCommitted: canonical identity / alias committed
+    IdentityCommitted --> DocumentsCommitted: FHIR document versions written
+    DocumentsCommitted --> Committed: ingestion ledger finalised
 
-    CANONICAL_PATIENT {
-        string canonical_patient_id PK
-        string synthetic_national_health_id UK
-    }
-
-    SOURCE_ALIAS {
-        string source_system PK
-        string source_patient_id PK
-        string canonical_patient_id FK
-    }
-
-    CLINICAL_RESOURCE {
-        string source_system PK
-        string resource_type PK
-        string resource_id PK
-        string version_id PK
-        string canonical_patient_id FK
-        json payload
-        datetime ingested_at
-    }
-
-    INGESTION_EVENT {
-        string event_id PK
-        string source_system
-        string outcome
-        string detail
-        datetime occurred_at
-    }
+    IdentityCommitted --> RecoveryRequired: document write interrupted
+    RecoveryRequired --> DocumentsCommitted: safe replay / reconciliation
+    Rejected --> [*]
+    Committed --> [*]
 ```
 
-The source-version key is:
+Deterministic source-version keys and idempotent replay make partial operations recoverable. The application must not expose an ingestion operation as fully committed until both the relational metadata and required MongoDB document writes have succeeded.
 
-\[
-(\text{source},\ \text{resourceType},\ \text{id},\ \text{versionId})
-\]
+## Local development
 
-An exact replay is idempotent. A new version is appended. A different payload presented under an already stored source-version key is rejected rather than silently overwriting the canonical record.
+`docker-compose.yml` provides:
 
-## Database portability
+- PostgreSQL for relational state;
+- MongoDB for FHIR documents;
+- Redis for disposable projection caching.
 
-The persistence layer is implemented with SQLAlchemy. Automated tests use SQLite so CI has no external clinical or database dependency. The schema and transaction boundary are intentionally database-portable; PostgreSQL remains the target persistent database for the reference deployment architecture.
+Unit tests may use isolated in-memory/test doubles so the default CI suite remains independent of external healthcare systems. Database integration tests should use the real services in dedicated integration workflows.
 
 ## Next boundary
 
-The next milestone consumes the canonical clinical store and derives the Patient 360 read model:
-
-```mermaid
-flowchart LR
-    STORE[(Canonical FHIR Store)]
-    ENGINE[Patient State Engine]
-    READ[(Patient 360 Read Model)]
-
-    STORE --> ENGINE
-    ENGINE --> READ
-```
+The Patient State Engine will consume PostgreSQL identity metadata plus MongoDB FHIR documents and produce rebuildable Patient 360 projections. Redis may accelerate those reads but must never become the only copy of clinically significant state.
