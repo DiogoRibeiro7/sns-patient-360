@@ -11,6 +11,7 @@ from pydicom.uid import (
     PYDICOM_IMPLEMENTATION_UID,
     DigitalXRayImageStorageForPresentation,
     ExplicitVRLittleEndian,
+    UID,
     generate_uid,
 )
 
@@ -66,11 +67,11 @@ def generate_synthetic_dx_study(
 
     file_meta = FileMetaDataset()
     file_meta.MediaStorageSOPClassUID = DigitalXRayImageStorageForPresentation
-    file_meta.MediaStorageSOPInstanceUID = sop_uid
+    file_meta.MediaStorageSOPInstanceUID = UID(sop_uid)
     file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
     file_meta.ImplementationClassUID = PYDICOM_IMPLEMENTATION_UID
 
-    dataset = FileDataset(None, {}, file_meta=file_meta, preamble=b"\0" * 128)
+    dataset = FileDataset(BytesIO(), {}, file_meta=file_meta, preamble=b"\0" * 128)
     dataset.SOPClassUID = DigitalXRayImageStorageForPresentation
     dataset.SOPInstanceUID = sop_uid
     dataset.StudyInstanceUID = study_uid
