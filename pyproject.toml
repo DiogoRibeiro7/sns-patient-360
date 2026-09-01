@@ -13,7 +13,9 @@ license = "MIT"
 
 dependencies = [
   "fastapi>=0.116,<1.0",
+  "httpx>=0.28,<1.0",
   "pydantic>=2.11,<3.0",
+  "pydicom>=3.0,<4.0",
   "pymongo>=4.15,<5.0",
   "redis>=6.4,<7.0",
   "sqlalchemy>=2.0,<3.0",
@@ -38,6 +40,9 @@ where = ["src"]
 [tool.pytest.ini_options]
 addopts = "-ra --strict-markers --strict-config"
 testpaths = ["tests"]
+markers = [
+  "integration: tests requiring local Docker Compose services",
+]
 
 [tool.ruff]
 target-version = "py311"
