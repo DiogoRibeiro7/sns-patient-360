@@ -6,7 +6,17 @@ import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from sqlalchemy import JSON, Column, DateTime, Engine, MetaData, String, Table, create_engine, select
+from sqlalchemy import (
+    JSON,
+    Column,
+    DateTime,
+    Engine,
+    MetaData,
+    String,
+    Table,
+    create_engine,
+    select,
+)
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import IntegrityError
 
@@ -148,7 +158,9 @@ class CanonicalClinicalStore:
             )
             return
         if str(existing["canonical_patient_id"]) != canonical_patient_id:
-            raise ValueError("source patient alias is already attached to another canonical patient")
+            raise ValueError(
+                "source patient alias is already attached to another canonical patient"
+            )
 
     def resource_exists(
         self,

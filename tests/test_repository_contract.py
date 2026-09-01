@@ -1,7 +1,8 @@
 """Repository-level architecture and requirements contract tests."""
 
-from pathlib import Path
+from __future__ import annotations
 
+from pathlib import Path
 
 REQUIRED_DOCS: tuple[str, ...] = (
     "docs/architecture/product-scope.md",
@@ -17,6 +18,11 @@ REQUIRED_DOCS: tuple[str, ...] = (
     "docs/adr/0003-synthetic-data-only.md",
     "docs/adr/0004-use-polyglot-persistence.md",
     "docs/adr/0005-use-dicom-for-diagnostic-imaging.md",
+)
+
+REQUIRED_WORKFLOWS: tuple[str, ...] = (
+    ".github/workflows/ci.yml",
+    ".github/workflows/dicom-integration.yml",
 )
 
 MERMAID_DOCS: tuple[str, ...] = (
@@ -42,14 +48,18 @@ REQUIRED_REQUIREMENT_IDS: tuple[str, ...] = (
 
 REQUIRED_IMAGING_REQUIREMENT_IDS: tuple[str, ...] = (
     "FR-070",
+    "FR-071",
+    "FR-072",
     "FR-073",
     "FR-074",
+    "FR-075",
     "FR-079",
     "NFR-100",
     "NFR-102",
     "NFR-110",
     "NFR-120",
     "NFR-140",
+    "NFR-141",
 )
 
 
@@ -67,6 +77,17 @@ def test_required_architecture_documents_exist() -> None:
         if not (repository_root / relative_path).is_file()
     ]
     assert not missing_documents, f"Missing architecture documents: {missing_documents}"
+
+
+def test_required_workflows_exist() -> None:
+    """Keep both baseline and real DICOMweb integration workflows versioned."""
+    repository_root = _repository_root()
+    missing_workflows = [
+        relative_path
+        for relative_path in REQUIRED_WORKFLOWS
+        if not (repository_root / relative_path).is_file()
+    ]
+    assert not missing_workflows, f"Missing workflows: {missing_workflows}"
 
 
 def test_architecture_documents_use_mermaid() -> None:

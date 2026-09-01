@@ -73,6 +73,67 @@ sequenceDiagram
     PACS-->>Viewer: DICOMweb response
 ```
 
+## Executable synthetic imaging path
+
+The first executable imaging milestone uses a deterministic synthetic DX study. The DICOM and FHIR planes share the same patient and DICOM UIDs.
+
+```mermaid
+flowchart LR
+    GEN[Synthetic DICOM Generator]
+    DCM[Deterministic DX Instance]
+    STOW[STOW-RS]
+    ORTHANC[(Orthanc PACS)]
+    MINIO[(MinIO Object Storage)]
+    QIDO[QIDO-RS Search]
+    WADO[WADO-RS Retrieve]
+
+    FHIRGEN[FHIR Imaging Link Builder]
+    ENDPOINT[Endpoint]
+    IMG[ImagingStudy]
+    REPORT[DiagnosticReport]
+    INGEST[FHIR Ingestion Boundary]
+
+    GEN --> DCM
+    DCM --> STOW
+    STOW --> ORTHANC
+    ORTHANC --> MINIO
+    ORTHANC --> QIDO
+    ORTHANC --> WADO
+
+    GEN --> FHIRGEN
+    FHIRGEN --> ENDPOINT
+    FHIRGEN --> IMG
+    FHIRGEN --> REPORT
+    ENDPOINT --> INGEST
+    IMG --> INGEST
+    REPORT --> INGEST
+
+    DCM -. same Study / Series / SOP UIDs .-> IMG
+```
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Test as Integration Test
+    participant Generator as Synthetic DICOM Generator
+    participant Orthanc as Orthanc DICOMweb
+    participant MinIO as MinIO
+    participant FHIR as FHIR Builder / Validator
+
+    Test->>Generator: Generate deterministic DX study
+    Generator-->>Test: DICOM bytes + Study/Series/SOP UIDs
+    Test->>Orthanc: STOW-RS instance
+    Orthanc->>MinIO: Persist DICOM object
+    Test->>Orthanc: QIDO-RS by Study Instance UID
+    Orthanc-->>Test: Matching study metadata
+    Test->>Orthanc: WADO-RS instance retrieval
+    Orthanc-->>Test: DICOM response
+    Test->>FHIR: Build Endpoint + ImagingStudy + DiagnosticReport
+    FHIR-->>Test: Resources linked to same patient and UIDs
+```
+
+Normal unit tests validate deterministic DICOM generation, FHIR UID linkage and DICOMweb request semantics using an injected HTTP transport. A dedicated `DICOM Integration` workflow starts the real Orthanc/MinIO stack and executes STOW → QIDO → WADO.
+
 ## FHIR relationship
 
 `ImagingStudy` is the FHIR representation of the study relationship and DICOM identifiers. `DiagnosticReport` carries the clinical interpretation/report and may reference the study. `Endpoint` provides retrieval connection information where appropriate.
@@ -146,16 +207,18 @@ The viewer and DICOMweb gateway must not be reachable through an unauthorised Pa
 
 ## Local reference implementation
 
-The planned local imaging stack is:
+The local imaging stack is:
 
 - **Orthanc** as the reference PACS/DICOMweb service;
 - **MinIO** as S3-compatible bulk object storage;
 - DICOMweb enabled on Orthanc;
+- a deterministic synthetic DICOM generator for tests;
+- a small application-side DICOMweb client for STOW-RS, QIDO-RS and WADO-RS;
 - optional web viewer support later.
 
 The architecture deliberately keeps PACS/VNA and object storage as separate concepts even when they run in the same local Docker Compose environment.
 
-## Out of scope for this architecture milestone
+## Out of scope for this milestone
 
 - production SNS imaging integration;
 - real DICOM patient data;
