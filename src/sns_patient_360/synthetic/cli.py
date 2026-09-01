@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 from sns_patient_360.synthetic.export import export_journey
 from sns_patient_360.synthetic.generator import generate_journey

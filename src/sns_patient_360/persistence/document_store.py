@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
+from pymongo import ReturnDocument
 from pymongo.collection import Collection
 
 from sns_patient_360.ingestion.models import CanonicalClinicalResource
@@ -54,24 +55,31 @@ class MongoClinicalDocumentStore:
         }
 
     def upsert_version(self, resource: CanonicalClinicalResource) -> bool:
-        """Insert one immutable source version or recognise an exact replay."""
+        """Atomically insert one immutable source version or recognise an exact replay."""
         key = self._key(resource)
-        existing = self._collection.find_one(key)
-        if existing is not None:
-            if existing.get("payload") != resource.payload:
-                raise ValueError(
-                    "conflicting payload for an existing source resource version; refusing overwrite"
-                )
-            return False
-
         document: dict[str, Any] = {
             **key,
             "canonical_patient_id": resource.canonical_patient_id,
             "payload": resource.payload,
             "provenance": resource.provenance.model_dump(mode="json"),
         }
-        self._collection.insert_one(document)
-        return True
+
+        # One atomic MongoDB operation removes the find-then-insert race between concurrent
+        # replays. ReturnDocument.BEFORE gives us the pre-existing document when this was a
+        # replay and None when this call inserted the version.
+        existing = self._collection.find_one_and_update(
+            key,
+            {"$setOnInsert": document},
+            upsert=True,
+            return_document=ReturnDocument.BEFORE,
+        )
+        if existing is None:
+            return True
+        if existing.get("payload") != resource.payload:
+            raise ValueError(
+                "conflicting payload for an existing source resource version; refusing overwrite"
+            )
+        return False
 
     def list_patient_resources(self, canonical_patient_id: str) -> tuple[dict[str, Any], ...]:
         """Return complete stored FHIR documents for one canonical patient."""

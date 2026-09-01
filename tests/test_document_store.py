@@ -29,15 +29,22 @@ class _Collection:
     def create_index(self, *args: Any, **kwargs: Any) -> None:
         return None
 
-    def find_one(self, key: dict[str, str]) -> dict[str, Any] | None:
+    def find_one_and_update(
+        self,
+        key: dict[str, str],
+        update: dict[str, dict[str, Any]],
+        *,
+        upsert: bool,
+        return_document: object,
+    ) -> dict[str, Any] | None:
+        del return_document
         for document in self.documents:
             if all(document.get(field) == value for field, value in key.items()):
-                return document
+                return dict(document)
+        if not upsert:
+            return None
+        self.documents.append(dict(update["$setOnInsert"]))
         return None
-
-    def insert_one(self, document: dict[str, Any]) -> object:
-        self.documents.append(dict(document))
-        return object()
 
     def find(
         self,

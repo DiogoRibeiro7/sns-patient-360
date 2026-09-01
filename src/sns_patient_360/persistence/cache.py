@@ -28,14 +28,22 @@ class RedisPatientProjectionCache:
         self._client = client
 
     def get(self, key: str) -> dict[str, Any] | None:
+        """Return a cached projection, treating invalid disposable state as a miss."""
         raw = self._client.get(key)
         if raw is None:
             return None
-        if isinstance(raw, bytes):
-            raw = raw.decode("utf-8")
-        value = json.loads(str(raw))
+
+        try:
+            if isinstance(raw, bytes):
+                raw = raw.decode("utf-8")
+            value = json.loads(str(raw))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self.delete(key)
+            return None
+
         if not isinstance(value, dict):
-            raise ValueError("cached patient projection must be a JSON object")
+            self.delete(key)
+            return None
         return value
 
     def set(self, key: str, value: dict[str, Any], ttl_seconds: int) -> None:

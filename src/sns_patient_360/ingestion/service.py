@@ -26,6 +26,11 @@ class IngestionService:
     Relational identity/audit state is handled by ``CanonicalClinicalStore``. When a
     ``ClinicalDocumentStore`` is configured, complete versioned FHIR resources are also
     written to the document store using the same deterministic source-version key.
+
+    PostgreSQL/SQLite and the document store do not share one transaction. The service
+    therefore offers every canonical resource to the document store on every replay. If
+    document persistence fails after the relational transaction commits, the attempt is
+    recorded as ``partial`` and a later replay can converge the two stores safely.
     """
 
     def __init__(
@@ -42,7 +47,8 @@ class IngestionService:
         """Ingest one source bundle with deterministic identity resolution and provenance."""
         ingested_at = datetime.now(UTC)
         source_hint = self._source_hint(bundle)
-        event_id = str(uuid5(NAMESPACE_URL, f"{source_hint}:{ingested_at.isoformat()}:{id(bundle)}"))
+        event_key = f"{source_hint}:{ingested_at.isoformat()}:{id(bundle)}"
+        event_id = str(uuid5(NAMESPACE_URL, event_key))
 
         try:
             source_system, source_patient_id, resources = validate_bundle(bundle)
@@ -72,7 +78,7 @@ class IngestionService:
         )
         accepted = 0
         duplicates = 0
-        new_documents: list[CanonicalClinicalResource] = []
+        canonical_documents: list[CanonicalClinicalResource] = []
 
         try:
             with self._store.transaction() as connection:
@@ -112,16 +118,12 @@ class IngestionService:
                             ingested_at=ingested_at,
                         ),
                     )
+                    canonical_documents.append(canonical)
                     if self._store.resource_exists(connection, canonical):
                         duplicates += 1
                     else:
                         self._store.insert_resource(connection, canonical)
-                        new_documents.append(canonical)
                         accepted += 1
-
-            if self._document_store is not None:
-                for canonical in new_documents:
-                    self._document_store.upsert_version(canonical)
         except ValueError as exc:
             self._store.record_ingestion_event(
                 event_id=event_id,
@@ -138,6 +140,31 @@ class IngestionService:
                 rejected=1,
                 errors=(str(exc),),
             )
+
+        if self._document_store is not None:
+            try:
+                for canonical in canonical_documents:
+                    self._document_store.upsert_version(canonical)
+            except Exception as exc:
+                detail = (
+                    "document-store persistence incomplete; safe replay required: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+                self._store.record_ingestion_event(
+                    event_id=event_id,
+                    source_system=source_system,
+                    outcome="partial",
+                    detail=detail,
+                    occurred_at=ingested_at,
+                )
+                return IngestionResult(
+                    source_system=source_system,
+                    canonical_patient_id=canonical_patient_id,
+                    accepted=0,
+                    duplicates=0,
+                    rejected=1,
+                    errors=(detail,),
+                )
 
         self._store.record_ingestion_event(
             event_id=event_id,
