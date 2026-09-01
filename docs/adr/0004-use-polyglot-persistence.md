@@ -35,6 +35,16 @@ A single ACID transaction cannot span PostgreSQL and MongoDB without introducing
 
 The system MUST NOT report an ingestion operation as fully committed unless the required relational metadata and FHIR document writes have completed.
 
+When the relational commit succeeds but MongoDB persistence is incomplete, the ingestion operation enters an explicit **partial** state. Every validated canonical resource is offered to MongoDB on replay, including resources that are already relational duplicates. Therefore a replay can repair missing document versions without duplicating relational state.
+
+MongoDB document creation MUST be atomic with respect to the source-version key. Concurrent replays of the same immutable resource version must converge on one stored document; a same-key resource with a different payload is a conflict and must be rejected.
+
+Redis is intentionally outside this consistency boundary. Malformed, stale or missing Redis content is treated as a cache miss and the projection is rebuilt from authoritative PostgreSQL and MongoDB state.
+
+## Local-development security
+
+The Docker Compose stack is a developer environment, not a production security model. Published database ports are bound to the loopback interface so unauthenticated development services are not exposed on all host interfaces. Production-oriented deployments require appropriate authentication, secret management, network isolation and transport security.
+
 ## Consequences
 
 ### Positive
@@ -43,12 +53,14 @@ The system MUST NOT report an ingestion operation as fully committed unless the 
 - Relational constraints remain available where they are valuable.
 - Patient 360 reads can later be cached without weakening the source-of-truth model.
 - Each data technology has one explicit responsibility.
+- Partial cross-database failures are recoverable through deterministic replay.
 
 ### Negative
 
 - Operational complexity increases.
 - Cross-database consistency must be explicit and testable.
 - Backup, monitoring and recovery procedures must cover more than one persistent database.
+- A partial-ingestion reconciliation path is required because PostgreSQL and MongoDB do not share a transaction.
 
 ## Rejected alternatives
 
